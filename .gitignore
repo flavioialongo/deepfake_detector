@@ -1,3 +1,4 @@
 dffd_dataset/*
-face_forensics/*
-dataset/*
+faceforensics/*
+dffd_small/*
+__pycache__/*
