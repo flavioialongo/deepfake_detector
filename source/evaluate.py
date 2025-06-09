@@ -43,7 +43,8 @@ def report(model, test_loader, loss, device, save_dir="results/reports", filenam
     import matplotlib.pyplot as plt
     import os
 
-    os.makedirs(save_dir, exist_ok=True)
+    if(save_dir):
+        os.makedirs(save_dir, exist_ok=True)
 
     model = model.to(device)
     model.eval()
@@ -57,6 +58,7 @@ def report(model, test_loader, loss, device, save_dir="results/reports", filenam
             input = input.to(device)
             target = target.to(device)
             output = model(input)
+
             l = loss(output, target)
             total_loss += l.item()
             preds = torch.argmax(output, dim=1)
@@ -73,7 +75,8 @@ def report(model, test_loader, loss, device, save_dir="results/reports", filenam
     disp.plot(cmap=plt.cm.Blues)
     plt.title("Confusion Matrix")
 
-    full_path = os.path.join(save_dir, filename)
-    plt.savefig(full_path)
-    print(f"Confusion matrix saved to {full_path}")
+    if(save_dir):
+        full_path = os.path.join(save_dir, filename)
+        plt.savefig(full_path)
+        print(f"Confusion matrix saved to {full_path}")
     plt.close()

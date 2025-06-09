@@ -4,12 +4,13 @@ from sklearn.metrics import (
 )
 import os 
 from tqdm import tqdm
-from source.pmi_injector import train_with_pmi
-from source.models import EfficientNet
+from source.pim_injector import train_with_pim
+from source.models import SplitModel
+import random 
 
 class Trainer():
 
-    def __init__(self, model, train_loader, val_loader, config, device="cpu"):
+    def __init__(self, model, train_loader, val_loader, config, device="cpu", model_type="efficientnet"):
 
         self.config = config
 
@@ -21,9 +22,10 @@ class Trainer():
         self.criterion = self.config.loss()
         
         self.device = device
-        self.best_f1 = 0.0
+        self.model_type = model_type 
 
-    def train(self, epochs, save_dir=None, save_name = "model.pt"):
+
+    def train(self, epochs, save_dir=None, save_name = "model.pt", attacker=None, adv_prob = 0.5, epsilon_choices = [0.001, 0.01, 0.1, 0.3]):
 
         os.makedirs(save_dir, exist_ok=True)
 
@@ -47,12 +49,44 @@ class Trainer():
 
             for batch in tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{epochs} - Training"):
                 images, labels = batch["image"].to(self.device), batch["label"].to(self.device)
-
                 self.optimizer.zero_grad()
-                outputs = self.model(images)
+
+                if attacker is not None and random.random()<adv_prob:
+                    images.requires_grad = True
+                    # First forward pass to get loss (used to compute gradients for FGSM/IFGSM)
+                    outputs = self.model(images)
+                    loss_for_attack = self.criterion(outputs, labels)
+
+                    # Compute gradient w.r.t. images only (do not retain graph)
+                    data_grad = torch.autograd.grad(loss_for_attack, images, retain_graph=False, create_graph=False)[0]
+                    
+                    epsilon = random.choice(epsilon_choices)
+                    alpha = epsilon / 4 
+                    # Generate adversarial examples
+                    if attacker.attack_type == "fgsm":
+                        adv_images = attacker.attack(images, epsilon, data_grad)
+                    elif attacker.attack_type == "pgd":
+                        adv_images = attacker.attack(images, labels, epsilon, alpha, attacker.pgd_steps)
+                    elif attacker.attack_type == "ifgsm":
+                        adv_images = attacker.attack(images, labels, epsilon, alpha, attacker.ifgsm_steps)
+                    elif attacker.attack_type == "deepfool":
+                        adv_images = attacker.attack(images, attacker.deepfool_overshoot, attacker.deepfool_maxiter)
+                    else:
+                        raise ValueError(f"Unsupported attack type: {attacker.attack_type}")
+
+                    # Detach to avoid memory issues and prevent gradient tracking through attack
+                    adv_images = adv_images.detach()
+
+                    # Final forward pass for training
+                    outputs = self.model(adv_images)
+                else:
+                    outputs = self.model(images)
+
+                # Final loss and backward
                 loss = self.criterion(outputs, labels)
                 loss.backward()
                 self.optimizer.step()
+
 
                 preds = outputs.argmax(dim=1)
                 correct += (preds == labels).sum().item()
@@ -96,10 +130,10 @@ class Trainer():
 
         return self.model, history
 
-    def train_with_pmi(self, epochs, alpha, r, scheduler=None, save_dir=None, save_name="model_pmi.pt"):
+    def train_with_pim(self, epochs, alpha, r, scheduler=None, save_dir=None, save_name="model_pmi.pt"):
 
         # Split into shallow and deep 
-        model = EfficientNet(self.model)
+        model = SplitModel(self.model, self.model_type)
     
         for s in model.shallow.parameters():
             s.requires_grad = True
@@ -111,7 +145,7 @@ class Trainer():
 
         file_path = os.path.join(save_dir, save_name)
     
-        return train_with_pmi(model, 
+        return train_with_pim(model, 
                               self.train_loader, 
                               self.val_loader,
                               self.optimizer, 
@@ -148,7 +182,7 @@ class Trainer():
                 eval_correct += (preds == labels).sum().item()
                 eval_total += labels.size(0)
 
-        eval_loss /= len(self.val_loader)
+        eval_loss /= len(val_loader)
         eval_acc = 100 * eval_correct / eval_total
         eval_f1 = f1_score(all_labels, all_preds, average="macro")  # or "weighted"
 
