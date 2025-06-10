@@ -4,7 +4,7 @@ from PIL import Image
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
-from source.attack import AdversarialAttacker
+from source.attacker import AdversarialAttacker
 
 class RealFakeDataset(Dataset):
     def __init__(self, root_dir, transform=None):

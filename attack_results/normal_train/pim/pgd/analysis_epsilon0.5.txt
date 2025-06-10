@@ -1,0 +1,36 @@
+
+============================================================
+ADVERSARIAL EVALUATION RESULTS (ε = 0.5)
+Attack: pgd | pgd epsilon: 0.5 | pgd alpha: 0.2 | pgd steps: 5
+============================================================
+Clean Accuracy: 94.00%
+Robust Accuracy (on initially correct): 89.47%
+Attack Success Rate: 10.53%
+
+Class-Specific Attack Analysis:
+  Real→Fake attack success: 18.60% (186/1000)
+  Fake→Real attack success: 0.00% (0/1000)
+  Bias Ratio (Fake→Real / Real→Fake): 0.00
+  ⚠️  WARNING: Strong bias toward predicting 'Fake' class!
+
+--- Clean Performance Report ---
+              precision    recall  f1-score   support
+
+        Real     0.8986    0.9920    0.9430      1000
+        Fake     0.9911    0.8880    0.9367      1000
+
+    accuracy                         0.9400      2000
+   macro avg     0.9448    0.9400    0.9398      2000
+weighted avg     0.9448    0.9400    0.9398      2000
+
+
+--- Adversarial Robustness Report (Initially Correct Samples Only) ---
+              precision    recall  f1-score   support
+
+        Real     1.0000    0.8004    0.8891       992
+        Fake     0.8177    1.0000    0.8997       888
+
+    accuracy                         0.8947      1880
+   macro avg     0.9088    0.9002    0.8944      1880
+weighted avg     0.9139    0.8947    0.8941      1880
+

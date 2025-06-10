@@ -1,4 +1,4 @@
-from .attack import *
+from .attacker import *
 from .configs import *
 from .datasets import *
 from .evaluate import *

@@ -1,41 +1,47 @@
 import torch
 from tqdm import tqdm
 from source.evaluate import evaluate_model 
-from source.attack import AdversarialAttacker
-
+import random 
+import numpy as np 
 def calculate_deltas(grad_mean, grad_sigma, r):
 
-    grad_mean_norm = torch.sqrt((grad_mean ** 2).sum(dim=1, keepdim=True)) + 1e-8
-    grad_std_norm = torch.sqrt((grad_sigma ** 2).sum(dim=1, keepdim=True)) + 1e-8
-    
-    print(f"Gradient mean norm: {grad_mean_norm.min()} to {grad_mean_norm.max()}")
-    print(f"Gradient std norm: {grad_std_norm.min()} to {grad_std_norm.max()}")
-    dmu = r*grad_mean/grad_mean_norm
-    dsigma = r*grad_sigma/grad_std_norm
+    # Batch-Level perturbation, same for all elements in batch 
+    avg_grad_mean = grad_mean.mean(dim=0, keepdim=True)   # [1, C, 1, 1]
+    avg_grad_sigma = grad_sigma.mean(dim=0, keepdim=True) # [1, C, 1, 1]
+
+    combined_grad = torch.cat([avg_grad_mean.flatten(), avg_grad_sigma.flatten()])
+    total_norm = torch.norm(combined_grad, p=2) + 1e-8
+
+    dmu = r * grad_mean / total_norm
+    dsigma = r * grad_sigma / total_norm
 
     return dmu, dsigma
 
 def calculate_f_prime(features, mu, sigma, dmu, dsigma):
 
-        f_norm = (features - mu) / (sigma+1e-8)
 
-        f_prime = f_norm*(sigma+dsigma) + (mu+dmu)
+    f_norm = (features - mu) / (sigma + 1e-8)
+    f_prime = f_norm * (sigma + dsigma) + (mu + dmu)
 
-        return f_prime
+    return f_prime
 
 # Training loop with PMI
 def train_with_pim(model, 
                    train_dataloader, 
                    eval_loader, 
                    optimizer, 
-                   loss_ce, 
+                   criterion, 
                    device, 
                    scheduler, 
                    num_epochs=5, 
                    alpha=0.1, 
                    r=0.1, 
                    patience=5, 
-                   save_path=None):
+                   save_path=None,
+                   attacker=None,
+                   adv_prob = 0.5, 
+                   epsilon_choices = [0.001, 0.01, 0.1, 0.3]):
+    
     model.to(device)
     
     counter = 0
@@ -64,25 +70,42 @@ def train_with_pim(model,
 
             optimizer.zero_grad()
 
-            shallow = model.shallow
-            shallow_layers = [shallow.shallow1, shallow.shallow2, shallow.shallow3, shallow.shallow4]
+            if attacker is not None and random.random()<adv_prob:
+                
+                original_epsilon = attacker.epsilon
+                epsilon = random.choice(epsilon_choices)
+                attacker.set_epsilon(epsilon)
+                # Generate adversarial examples
+                
+                if attacker.attack_type != "deepfool":
+                    adv_images = attacker.attack(images, labels)
+                elif attacker.attack_type == "deepfool":
+                    adv_images = attacker.attack(images)
+                else:
+                    raise ValueError(f"Unsupported attack type: {attacker.attack_type}")
+                
+                # Replace original images with adversarial ones
+                images = adv_images.detach()
+                attacker.set_epsilon(original_epsilon)
 
+            shallow_layers = model.shallow.layers 
             dmus = [0 for _ in range(len(shallow_layers))]
             dsigmas = [0 for _ in range(len(shallow_layers))]
             means = [0 for _ in range(len(shallow_layers))]
             stds = [0 for _ in range(len(shallow_layers))]
             f_primes = [0 for _ in range(len(shallow_layers))]
-
+            
             for i, layer in enumerate(shallow_layers):
+                
                 if i == 0:
                     feature = layer(images)
                 else:
                     feature = layer(f_primes[i - 1])
 
                 means[i] = torch.mean(feature, [2, 3], keepdim=True)
-                means[i].retain_grad()
-
                 stds[i] = torch.std(feature, [2, 3], keepdim=True)
+
+                means[i].retain_grad()
                 stds[i].retain_grad()
 
                 # in this stage, f_prime is equal to feature (dmu, dsigma=0)
@@ -92,7 +115,7 @@ def train_with_pim(model,
 
             deep = model.deep
             logits = deep(f_primes[-1])
-            loss = loss_ce(logits, labels)
+            loss = criterion(logits, labels)
             epoch_clean_loss += loss.item()
 
             # Track accuracy
@@ -101,29 +124,26 @@ def train_with_pim(model,
             total += labels.size(0)
 
             loss.backward(retain_graph=True)
-            grads_g1 = [p.grad.clone() for p in shallow.parameters()]
-
-            optimizer.zero_grad()   
 
             for i in range(len(shallow_layers)):
                 dmu, dsigma = calculate_deltas(means[i].grad, stds[i].grad, r)
                 dmus[i] = dmu.detach()
                 dsigmas[i] = dsigma.detach()
 
-            print(f"dmu range: {dmus[0].min()} to {dmus[0].max()}")
-            print(f"dsigma range: {dsigmas[0].min()} to {dsigmas[0].max()}")
-
             for i, layer in enumerate(shallow_layers):
                 f_primes[i] = calculate_f_prime(f_primes[i], means[i], stds[i], dmus[i], dsigmas[i])
 
             logits_perturbed = deep(f_primes[-1])
-            loss_perturbed = loss_ce(logits_perturbed, labels)
-            epoch_perturbed_loss += loss_perturbed.item()
-            loss_perturbed.backward()
+            
+            
+            loss_perturbed = criterion(logits_perturbed, labels)
+            loss_clean = loss
+            
+            total_loss = (1 - alpha) * loss_clean + alpha * loss_perturbed
 
-            grads_g2 = [p.grad.clone() for p in shallow.parameters()]
-            for p, g1, g2 in zip(shallow.parameters(), grads_g1, grads_g2):
-                p.grad = (1 - alpha) * g1 + alpha * g2
+
+            epoch_perturbed_loss += loss_perturbed.item()
+            total_loss.backward()
             
             optimizer.step()
 
@@ -131,7 +151,12 @@ def train_with_pim(model,
         avg_perturbed_loss = epoch_perturbed_loss / len(train_dataloader)
         train_accuracy = 100.0 * correct / total
 
-        test_loss, test_accuracy, test_f1 = evaluate_model(model, eval_loader, loss_ce, device)
+        test_loss, test_accuracy, test_f1 = evaluate_model(model=model, 
+                                                           test_dataloader=eval_loader, 
+                                                           criterion=criterion, 
+                                                           device=device, 
+                                                           visualize_bar=False,
+                                                           verbose=False)
 
         print(
             f"Epoch {epoch+1}/{num_epochs} | "
@@ -140,7 +165,10 @@ def train_with_pim(model,
             f"Train Accuracy: {train_accuracy:.2f}% | "
             f"Test Loss: {test_loss:.4f} | "
             f"Test Accuracy: {test_accuracy:.2f}% | "
-            f"Test F1: {test_f1:.4f}"
+            f"Test F1: {test_f1:.4f} | "
+            f"(Best F1 {best_f1:.4f}) |"
+            f"(Early stopping countdown {patience-counter}) |"
+            
         )
 
         # Save metrics to history
@@ -158,6 +186,9 @@ def train_with_pim(model,
             if save_path:
                 torch.save(best_model, save_path)
                 print(f"✔️ Saved new best model at epoch {epoch+1} with F1: {test_f1:.4f}")
+            if(best_f1>=0.94):
+                    print("")
+                    break
         else:
             counter += 1
             if counter >= patience:

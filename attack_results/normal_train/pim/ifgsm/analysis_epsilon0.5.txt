@@ -1,0 +1,36 @@
+
+============================================================
+ADVERSARIAL EVALUATION RESULTS (ε = 0.5)
+Attack: ifgsm | ifgsm epsilon: 0.5 | ifgsm alpha: 0.2 | ifgsm steps: 5
+============================================================
+Clean Accuracy: 94.00%
+Robust Accuracy (on initially correct): 88.94%
+Attack Success Rate: 11.06%
+
+Class-Specific Attack Analysis:
+  Real→Fake attack success: 21.00% (210/1000)
+  Fake→Real attack success: 0.60% (6/1000)
+  Bias Ratio (Fake→Real / Real→Fake): 0.03
+  ⚠️  WARNING: Strong bias toward predicting 'Fake' class!
+
+--- Clean Performance Report ---
+              precision    recall  f1-score   support
+
+        Real     0.8986    0.9920    0.9430      1000
+        Fake     0.9911    0.8880    0.9367      1000
+
+    accuracy                         0.9400      2000
+   macro avg     0.9448    0.9400    0.9398      2000
+weighted avg     0.9448    0.9400    0.9398      2000
+
+
+--- Adversarial Robustness Report (Initially Correct Samples Only) ---
+              precision    recall  f1-score   support
+
+        Real     0.9987    0.7913    0.8830       992
+        Fake     0.8108    0.9989    0.8951       888
+
+    accuracy                         0.8894      1880
+   macro avg     0.9048    0.8951    0.8890      1880
+weighted avg     0.9100    0.8894    0.8887      1880
+

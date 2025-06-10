@@ -1,0 +1,35 @@
+
+============================================================
+ADVERSARIAL EVALUATION RESULTS (ε = 0.001)
+Attack: fgsm
+============================================================
+Clean Accuracy: 95.10%
+Robust Accuracy (on initially correct): 4.15%
+Attack Success Rate: 95.85%
+
+Class-Specific Attack Analysis:
+  Real→Fake attack success: 95.40% (954/1000)
+  Fake→Real attack success: 86.90% (869/1000)
+  Bias Ratio (Fake→Real / Real→Fake): 0.91
+
+--- Clean Performance Report ---
+              precision    recall  f1-score   support
+
+        Real     0.9457    0.9570    0.9513      1000
+        Fake     0.9565    0.9450    0.9507      1000
+
+    accuracy                         0.9510      2000
+   macro avg     0.9511    0.9510    0.9510      2000
+weighted avg     0.9511    0.9510    0.9510      2000
+
+
+--- Adversarial Robustness Report (Initially Correct Samples Only) ---
+              precision    recall  f1-score   support
+
+        Real     0.0034    0.0031    0.0033       957
+        Fake     0.0738    0.0804    0.0770       945
+
+    accuracy                         0.0415      1902
+   macro avg     0.0386    0.0418    0.0401      1902
+weighted avg     0.0384    0.0415    0.0399      1902
+
