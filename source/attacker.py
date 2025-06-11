@@ -111,10 +111,8 @@ class AdversarialAttacker:
             # Update adversarial image with sign of gradient
             x_adv = x_adv.detach() + self.alpha * grad.sign()
             
-            # Project back to epsilon-ball
-            x_adv = torch.min(torch.max(x_adv, x_orig - self.epsilon), x_orig + self.epsilon)
-            x_adv = torch.clamp(x_adv, 0, 1)  # keep in valid image range
-        
+            x_adv = torch.clamp(x_adv, 0, 1)  # Valid image range only
+
         # Re-normalize to model input format
         x_adv_norm = (x_adv - mean) / std
         return x_adv_norm
