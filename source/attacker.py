@@ -74,7 +74,7 @@ class AdversarialAttacker:
         outputs = self.model(x_input)
         loss = self.loss(outputs, labels)
         
-        # Compute gradients w.r.t the image using autograd.grad
+        # Compute gradients w.r.t the image
         grad = torch.autograd.grad(loss, x_adv, retain_graph=False)[0]
         
         # Update adversarial image with sign of gradient
@@ -87,6 +87,7 @@ class AdversarialAttacker:
         return (x_adv - mean) / std
 
     def i_fgsm_attack(self, images, labels):
+
         # Denormalize
         mean = self.mean
         std = self.std
@@ -105,24 +106,29 @@ class AdversarialAttacker:
             outputs = model(x_input)
             loss = self.loss(outputs, labels)
             
-            # Compute gradients using autograd.grad
+            # Compute gradients w.r.t. the image
             grad = torch.autograd.grad(loss, x_adv, retain_graph=False)[0]
             
             # Update adversarial image with sign of gradient
             x_adv = x_adv.detach() + self.alpha * grad.sign()
             
-            x_adv = torch.clamp(x_adv, 0, 1)  # Valid image range only
+            # Clip to ensure valid pixel range [0,1]
+            x_adv = torch.clamp(x_adv, 0, 1)
 
-        # Re-normalize to model input format
+        # Renormalize before returning
         x_adv_norm = (x_adv - mean) / std
         return x_adv_norm
 
     def pgd_attack(self, images, labels):
+
+        # Denormalize
         mean = self.mean
         std = self.std
         images_denorm = images * std + mean
         
         model = self.model
+
+        # Initialize adversarial image
         x_adv = images_denorm.clone().detach()
         
         # Random initialization within epsilon ball
@@ -134,10 +140,10 @@ class AdversarialAttacker:
             outputs = model((adv_images - mean) / std)
             loss = self.loss(outputs, labels)
             
-            # Use autograd.grad instead of backward
+            # Calculate gradient w.r.t the image
             grad = torch.autograd.grad(loss, adv_images, retain_graph=False)[0]
             
-            # Gradient step
+            # Update adversarial image with sign of gradient
             adv_images = adv_images.detach() + self.alpha * grad.sign()
             
             # Project back to epsilon-ball
@@ -150,10 +156,12 @@ class AdversarialAttacker:
 
     def deepfool_attack(self, image):
         
+        # TODO fix this 
+
         mean = self.mean
         std = self.std
         model = self.model 
-        # 1. Denormalizza l'immagine
+
         image_denorm = image * std + mean
         pert_image = image_denorm.clone().detach()
 
@@ -189,7 +197,7 @@ class AdversarialAttacker:
             r_tot = r_tot + ri
             pert_image = image_denorm + (1 + self.overshoot) * r_tot
 
-            # Verifica se la classe è cambiata
+        
             with torch.no_grad():
                 new_label = model((pert_image - mean) / std).argmax(dim=1).item()
             if new_label != label:
@@ -197,7 +205,6 @@ class AdversarialAttacker:
 
             loop_i += 1
 
-        # 3. Clampa e rinormalizza
         pert_image = torch.clamp(pert_image, 0, 1)
         adv_norm = (pert_image - mean) / std
         return adv_norm
@@ -210,7 +217,6 @@ class AdversarialAttacker:
         self.model.eval()
         self.model.to(self.device)
         
-        # Comprehensive tracking
         results = {
             'clean_correct': 0,
             'clean_total': 0,
@@ -241,7 +247,7 @@ class AdversarialAttacker:
             images, labels = batch["image"].to(self.device), batch["label"].to(self.device)
             batch_size = images.size(0)
             
-            # === CLEAN EVALUATION ===
+            # CLEAN EVALUATION 
             with torch.no_grad():
                 clean_outputs = self.model(images)
                 clean_preds = clean_outputs.argmax(dim=1)
@@ -251,11 +257,11 @@ class AdversarialAttacker:
             results['clean_correct'] += clean_correct_mask.sum().item()
             results['clean_total'] += batch_size
             
-            # Save clean predictions for overall analysis
+            # Save clean predictions
             all_clean_labels.extend(labels.cpu().numpy())
             all_clean_preds.extend(clean_preds.cpu().numpy())
             
-            # === ADVERSARIAL EVALUATION (Only on correctly classified samples) ===
+            # ADVERSARIAL EVALUATION (Only on correctly classified samples)
             correctly_classified_indices = clean_correct_mask.nonzero(as_tuple=True)[0]
             
             if len(correctly_classified_indices) > 0:
@@ -292,7 +298,8 @@ class AdversarialAttacker:
                     )
                     visualization_count += min(num_visualize - visualization_count, len(correctly_classified_indices))
             
-            # === CLASS-SPECIFIC ANALYSIS (All samples) ===
+            #  CLASS-SPECIFIC ANALYSIS (All samples)
+
             # This helps understand bias patterns
             images_for_class_analysis = images.clone()
             images_for_class_analysis.requires_grad = True
@@ -329,7 +336,7 @@ class AdversarialAttacker:
                 all_fake_clean_preds.extend(clean_preds[fake_mask].cpu().numpy())
                 all_fake_adv_preds.extend(all_adv_preds[fake_mask].cpu().numpy())
         
-        # === COMPUTE METRICS ===
+        # COMPUTE METRICS 
         clean_accuracy = 100.0 * results['clean_correct'] / results['clean_total']
         
         # Robustness: How well does the model maintain correct predictions under attack?
@@ -347,7 +354,7 @@ class AdversarialAttacker:
         # Bias analysis
         bias_ratio = results['fake_to_real_attacks'] / max(results['real_to_fake_attacks'], 1)
         
-        # === REPORTING ===
+        # REPORTING 
         with open(os.path.join(save_path, f"analysis_epsilon{self.epsilon}.txt"), 'w') as f:
             def write_and_print(line):
                 print(line)
