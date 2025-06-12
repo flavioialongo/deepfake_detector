@@ -53,6 +53,7 @@ class AttackTester:
         
         adv_images = self.attacker.attack(images, labels)
         
+        
         with torch.no_grad():
             adv_outputs = self.attacker.model(adv_images)
             adv_preds = torch.argmax(adv_outputs, dim=1)
@@ -86,9 +87,12 @@ class AttackTester:
         clean_img_denorm = self._denormalize(clean_img).detach().squeeze(0).cpu().numpy().transpose(1,2,0)
         adv_img_denorm = self._denormalize(adv_img).detach().squeeze(0).cpu().numpy().transpose(1,2,0)
 
-
         # Calculate perturbation
-        diff = np.clip((clean_img_denorm - adv_img_denorm) * 10, 0, 1)
+        amplifier = 10
+        if(self.attacker.attack_type == "deepfool"):
+            amplifier = 50
+        
+        diff = np.clip((clean_img_denorm - adv_img_denorm) * amplifier, 0, 1)
         
         # Create figure
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
@@ -97,7 +101,7 @@ class AttackTester:
         titles = [
             f"Original (Pred: {clean_pred}, True: {true_label})",
             f"Adversarial (Pred: {adv_pred})",
-            f"Perturbation (x10)"
+            f"Perturbation (x{amplifier})"
         ]
         
         for ax, img, title in zip(axes, [clean_img_denorm, adv_img_denorm, diff], titles):
@@ -126,7 +130,7 @@ def main(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     test_dataset = RealFakeDataset(args.test_path, Configs.test_img_augm)
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size = Configs.batch_size, shuffle=False, collate_fn=test_dataset.collate_fn)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size = Configs.batch_size, shuffle=True, collate_fn=test_dataset.collate_fn)
 
     epsilon = args.epsilon
     attacker = AdversarialAttacker(
@@ -142,7 +146,9 @@ def main(args):
     )
     
     output_dir = os.path.join("attack_tests", args.attack_type)
-    output_dir = os.path.join(output_dir, f"epsilon_{epsilon}")
+
+    if(args.attack_type != "deepfool"):
+        output_dir = os.path.join(output_dir, f"epsilon_{epsilon}")
     
     # Test attacks
     tester = AttackTester(attacker, test_loader, device, Configs.MEAN, Configs.STD, output_dir)

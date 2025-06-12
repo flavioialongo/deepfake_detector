@@ -1,0 +1,36 @@
+
+============================================================
+ADVERSARIAL EVALUATION RESULTS (ε = 0.01)
+Attack: deepfool | overshoot: 0.2 | max_iter: 5
+============================================================
+Clean Accuracy: 96.30%
+Robust Accuracy (on initially correct): 45.90%
+Attack Success Rate: 54.10%
+
+Class-Specific Attack Analysis:
+  Real→Fake attack success: 13.80% (138/1000)
+  Fake→Real attack success: 90.40% (904/1000)
+  Bias Ratio (Fake→Real / Real→Fake): 6.55
+  ⚠️  WARNING: Strong bias toward predicting 'Real' class!
+
+--- Clean Performance Report ---
+              precision    recall  f1-score   support
+
+        Real     0.9639    0.9620    0.9630      1000
+        Fake     0.9621    0.9640    0.9630      1000
+
+    accuracy                         0.9630      2000
+   macro avg     0.9630    0.9630    0.9630      2000
+weighted avg     0.9630    0.9630    0.9630      2000
+
+
+--- Adversarial Robustness Report (Initially Correct Samples Only) ---
+              precision    recall  f1-score   support
+
+        Real     0.4769    0.8565    0.6126       962
+        Fake     0.3030    0.0622    0.1033       964
+
+    accuracy                         0.4590      1926
+   macro avg     0.3899    0.4594    0.3580      1926
+weighted avg     0.3899    0.4590    0.3577      1926
+

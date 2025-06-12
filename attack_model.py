@@ -15,7 +15,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Test model robustness against adversarial attacks.")
     
     parser.add_argument("--model_path", type=str, required=True, help="Path to the trained model")
-    parser.add_argument("--test_path", type=str, default="./dffd_dataset/test", help="Path to the test dataset")
+    parser.add_argument("--test_path", type=str, default="./dffd_small/test", help="Path to the test dataset")
     parser.add_argument("--attack_type", type=str, required=True, 
                        choices=["fgsm", "pgd", "deepfool", "ifgsm"], 
                        help="Type of attack to test")

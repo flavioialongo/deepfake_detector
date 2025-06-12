@@ -41,19 +41,14 @@ class AdversarialAttacker:
             self.attack = self.pgd_attack
         elif attack_type == "ifgsm":
             self.attack = self.i_fgsm_attack
-            self.steps = iterative_steps
-            self.alpha = 2*epsilon / iterative_steps
-    
         elif attack_type == "deepfool":
             self.attack = self.deepfool_attack
-            self.deepfool_overshoot = deepfool_overshoot
-            self.deepfool_maxiter = iterative_steps
         else:
             raise Exception("Unknown attack type")
         
-    
         self.steps = iterative_steps
         self.alpha = 2*epsilon / iterative_steps
+        self.deepfool_overshoot = deepfool_overshoot
 
     def _denormalize(self, tensor):
         return tensor * self.std + self.mean
@@ -154,60 +149,75 @@ class AdversarialAttacker:
         return (adv_images - mean) / std
 
 
-    def deepfool_attack(self, image):
+    def deepfool_attack(self, images, labels):
+        model = self.model.eval()  # Ensure eval mode
+        device = self.device
+        mean = self.mean.to(device)
+        std = self.std.to(device)
         
-        # TODO fix this 
-
-        mean = self.mean
-        std = self.std
-        model = self.model 
-
-        image_denorm = image * std + mean
-        pert_image = image_denorm.clone().detach()
-
-        r_tot = torch.zeros_like(image).to(self.device)
-
-        loop_i = 0
-        with torch.no_grad():
-            label = model(image).argmax(dim=1).item()
-
-        while loop_i < self.steps:
-            pert_image = pert_image.detach().requires_grad_()
-            outputs = model((pert_image - mean) / std)
-            fs = outputs.flatten()
-
-            grad_orig = torch.autograd.grad(fs[label], pert_image, retain_graph=True)[0]
-            min_dist = float('inf')
-            w = None
-
-            num_classes = 2
-            for k in range(num_classes):
-                if k == label:
-                    continue
-                grad_k = torch.autograd.grad(fs[k], pert_image, retain_graph=True)[0]
-                w_k = grad_k - grad_orig
-                f_k = (fs[k] - fs[label]).item()
-                dist = abs(f_k) / (w_k.norm() + 1e-8)
-
-                if dist < min_dist:
-                    min_dist = dist
-                    w = w_k
-
-            ri = (min_dist + 1e-4) * w / (w.norm() + 1e-8)
-            r_tot = r_tot + ri
-            pert_image = image_denorm + (1 + self.overshoot) * r_tot
-
-        
+        adv_examples = []
+        for i in range(len(images)):
+            image = images[i:i+1].to(device)
+            label = labels[i].item()
+            
+            # Denormalize
+            image_denorm = image * std + mean
+            pert_image = image_denorm.clone().detach()
+            r_tot = torch.zeros_like(pert_image)
+            
+            # Initial prediction
             with torch.no_grad():
-                new_label = model((pert_image - mean) / std).argmax(dim=1).item()
-            if new_label != label:
-                break
-
-            loop_i += 1
-
-        pert_image = torch.clamp(pert_image, 0, 1)
-        adv_norm = (pert_image - mean) / std
-        return adv_norm
+                pred = model((pert_image - mean) / std).argmax().item()
+                if pred != label:
+                    adv_examples.append(image)
+                    continue
+                    
+            for _ in range(self.steps):
+                pert_image.requires_grad = True
+                
+                # Forward pass
+                logits = model((pert_image - mean) / std)[0]
+                pred = logits.argmax().item()
+                
+                if pred != label:
+                    break
+                    
+                # Compute gradients
+                grads = []
+                for k in range(len(logits)):
+                    model.zero_grad()
+                    logits[k].backward(retain_graph=True)
+                    grads.append(pert_image.grad.clone())
+                    
+                # Find minimal perturbation
+                logit_true = logits[label]
+                grad_true = grads[label]
+                min_dist = float('inf')
+                best_ri = None
+                
+                for k in range(len(logits)):
+                    if k == label:
+                        continue
+                        
+                    w_k = grads[k] - grad_true
+                    f_k = (logits[k] - logit_true).item()
+                    dist = abs(f_k) / (w_k.norm() + 1e-10)
+                    
+                    if dist < min_dist:
+                        min_dist = dist
+                        best_ri = (dist + 1e-6) * w_k / (w_k.norm() + 1e-10)
+                
+                # Update perturbation
+                if best_ri is None:
+                    break
+                    
+                r_tot = r_tot + best_ri
+                pert_image = torch.clamp(image_denorm + (1 + self.deepfool_overshoot) * r_tot, 0, 1).detach()
+            
+            # Normalize and store
+            adv_examples.append((pert_image - mean) / std)
+        
+        return torch.cat(adv_examples, dim=0)
 
     def evaluate_attack(self, dataloader, save_path=None, save_name="adv_analysis", visualize=False, num_visualize=5):
         
@@ -271,10 +281,7 @@ class AdversarialAttacker:
                 correct_images.requires_grad = True
                 
                 # Choose correct attack type 
-                if self.attack_type != "deepfool":
-                    adv_images = self.attack(correct_images, correct_labels)
-                else:
-                    adv_images = self.attack(correct_images)
+                adv_images = self.attack(correct_images, correct_labels)
 
                 # Evaluate adversarial examples
                 with torch.no_grad():
@@ -305,10 +312,7 @@ class AdversarialAttacker:
             images_for_class_analysis.requires_grad = True
             
             self.model.zero_grad()
-            if self.attack_type != "deepfool":
-                all_adv_images = self.attack(images_for_class_analysis, labels)
-            else:
-                all_adv_images = self.attack(images_for_class_analysis)
+            all_adv_images = self.attack(images_for_class_analysis, labels)
 
             with torch.no_grad():
                 all_adv_outputs = self.model(all_adv_images)
@@ -362,8 +366,12 @@ class AdversarialAttacker:
 
             # === REPORTING ===
             write_and_print(f"\n{'='*60}")
-            write_and_print(f"ADVERSARIAL EVALUATION RESULTS (ε = {self.epsilon})")
             
+            if(self.attack_type != "deepfool"):
+                write_and_print(f"ADVERSARIAL EVALUATION RESULTS (ε = {self.epsilon})")
+            else: 
+                write_and_print(f"ADVERSARIAL EVALUATION RESULTS (deepfool)")
+
             attack_param_str = f"Attack: {self.attack_type}"
             if self.attack_type.lower() == 'fgsm':
                 pass  
@@ -372,7 +380,7 @@ class AdversarialAttacker:
             elif self.attack_type.lower() == 'ifgsm':
                 attack_param_str += f" | ifgsm epsilon: {self.epsilon} | ifgsm alpha: {self.alpha} | ifgsm steps: {self.steps}"
             else:
-                attack_param_str += f" | overshoot: {self.deepfool_overshoot} | max_iter: {self.deepfool_maxiter}"
+                attack_param_str += f" | overshoot: {self.deepfool_overshoot} | max_iter: {self.steps}"
 
             write_and_print(attack_param_str)
 
@@ -534,25 +542,33 @@ class AdversarialAttacker:
 
     def evaluate_epsilons(self, val_loader, epsilons = [0, 0.001, 0.01, 0.1], save_path = None, save_name="analysis"):
 
-        accuracies = []
-        orig_epsilon = self.epsilon
-        for eps in epsilons:
-            self.set_epsilon(eps)
+        if(self.attack_type != "deepfool"):
+            orig_epsilon = self.epsilon
+            orig_alpha = self.alpha
+            for eps in epsilons:
+                self.set_epsilon(eps)
 
-            if(self.alpha):
-                self.alpha = 2*eps / self.steps
+                if(self.alpha):
+                    self.alpha = 2*eps / self.steps
 
-            print(f"Evaluating for ε={eps}")
+                print(f"Evaluating for ε={eps}")
+                acc = self.evaluate_attack(
+                    dataloader=val_loader,   
+                    save_path=save_path,
+                    save_name=save_name,
+                    visualize=False,        
+                    num_visualize=2)
+                
+            self.set_epsilon(orig_epsilon)
+            self.alpha = orig_alpha
+        else:
+            print(f"Evaluating Deepfool")
             acc = self.evaluate_attack(
-                dataloader=val_loader,   
-                save_path=save_path,
-                save_name=save_name,
-                visualize=False,        
-                num_visualize=2)
-            
-            accuracies.append(acc)
-        self.set_epsilon(orig_epsilon)
-
+                    dataloader=val_loader,   
+                    save_path=save_path,
+                    save_name=save_name,
+                    visualize=False,        
+                    num_visualize=2)
         
     def set_epsilon(self, epsilon):
         self.epsilon = epsilon 

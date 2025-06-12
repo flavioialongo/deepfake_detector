@@ -44,5 +44,5 @@ class Configs:
     attack_iter_steps = 5
     attack_iter_alpha = 0.001
     attack_iter_epsilon = 0.01
-    deepfool_overshoot = 0.02
+    deepfool_overshoot = 0.2
     
